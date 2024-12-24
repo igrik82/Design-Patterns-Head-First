@@ -54,7 +54,7 @@ public:
 
 // Объявляем базовый класс субъекта который будет выступать в роли интерфейса
 class BaseSubject {
-private:
+protected:
     // Объявляем простой односвязный список для регистрации
     // объектов класса наблюдатель
     std::forward_list<std::shared_ptr<Observer>> _observers;
@@ -64,6 +64,17 @@ public:
     // создаем виртуальный деструктор
     virtual ~BaseSubject() { }
 
+    // Добавляем экземпляр наблюдателя в список
+    virtual void addObserver(std::shared_ptr<Observer> observer) = 0;
+    // Удаляем экземпляр наблюдателя из списка
+    virtual void removeObserver(std::shared_ptr<Observer>& observer) = 0;
+
+    // В цикле перебираем список наблюдателей и вызываем у них метод notify
+    virtual void notify() = 0;
+};
+
+class Subject : public BaseSubject {
+public:
     // Добавляем экземпляр наблюдателя в список
     virtual void addObserver(std::shared_ptr<Observer> observer)
     {
@@ -90,8 +101,6 @@ public:
         }
     }
 };
-
-class Subject : public BaseSubject { };
 
 int main()
 {
