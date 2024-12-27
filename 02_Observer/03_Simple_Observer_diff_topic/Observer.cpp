@@ -4,23 +4,30 @@
  * Паттерн наблюдатель в упрощенном виде c интерфейсом и возможностью
  * уведомления разных наблюдателей в связи с наступлением разных событий.
  * Для этого необходимо реализовать разветвляющуюся структуру.
- * Для простого понимания возьмем простой forward_list и к определенной ячейке
- * события, сделаем дополнительный forward_list в котором в свою очередь,
- * находятся разные наблюдатели.
+ * Для простого понимания возьмем "map" в котором ключ это событие, а значение
+ * forward_list в котором находятся разные наблюдатели.
  *
- * +---------+   +----------+   +---------+
- * | Event 3 |-->| Event 2  |-->| Event 1 |
- * +---------+   +----------+   +---------+
- *      |             |              |
- *      v             v              v
- * +---------+   +----------+   +---------+
- * |Observer2|   |Observer1 |   |Observer3|
- * +---------+   +----------+   +---------+
- *      |                            |
- *      v                            v
- * +---------+                  +---------+
- * |Observer1|                  |Observer1|
- * +---------+                  +---------+
+ * Пример структуры, которая представляет "map" в виде красно-черного дерева
+ * и односвязным списком forward_list с наблюдателями.
+ *
+ *                           +-------+------------+
+ *                          /|Event 2|Forward_list|\
+ *                         / +-------+------------+ \
+ *                        /                |         \
+ *                       v                 v          v
+ *   +------+------------+             +---------+     +-------+------------+
+ *   |Event1|Forward_list|             |Observer1|     |Event 1|Forward_list|
+ *   +------+-----|------+             +---------+     +-------+------------+
+ *                |                                                   |
+ *                v                                                   v
+ *           +---------+                                         +---------+
+ *           |Observer2|                                         |Observer3|
+ *           +----|----+                                         +----|----+
+ *                |                                                   |
+ *                v                                                   |
+ *           +---------+                                         +----v----+
+ *           |Observer1|                                         |Observer1|
+ *           +---------+                                         +---------+
  *
  */
 #include <forward_list>
@@ -97,7 +104,7 @@ public:
         = 0;
 
     // В цикле перебираем список наблюдателей и вызываем у них метод notify
-    virtual void notify() = 0;
+    virtual void notify(int event) = 0;
 };
 
 class Subject : public BaseSubject {
@@ -106,10 +113,12 @@ public:
     // будут получать, в зависимости от подписки на выбранное событие
     enum MessageTypes { DATA,
         MQTT,
-        LOG };
+        LOG,
+        ALL };
 
     // Добавляем экземпляр наблюдателя в список
-    void addObserver(int messageTypes, std::shared_ptr<Observer> observer)
+    void addObserver(int messageTypes,
+        std::shared_ptr<Observer> observer) override
     {
         // Ищем тип сообщения в списке, т.е. его номер ENUM
         auto it = _observers.find(messageTypes);
@@ -128,34 +137,61 @@ public:
     }
 
     // Удаляем экземпляр наблюдателя из списка
-    void removeObserver(int messageTypes, std::shared_ptr<Observer>& observer)
+    void removeObserver(int messageTypes,
+        std::shared_ptr<Observer>& observer) override
     {
+        // Ищем топик по ключу map
         auto it = _observers.find(messageTypes);
         if (it == _observers.end()) {
-            return;
+            std::cout << "Topic not found\n";
         } else {
-            ObserversList& list = _observers[messageTypes];
-            for (ObserversList::iterator it = list.begin(); it != list.end();) {
-                if (*it == observer) {
-                    list.remove(observer);
-                    // Обнуляем счетчик ссылок наблюдателя для удаления его из памяти
-                    std::cout << observer.get()->getName()
-                              << " removed from subscription #" << messageTypes
-                              << std::endl;
+            // Удалить все вхождения
+            // Не очень эффективно, т.к. проходится по всему списку. Но просто.
+            // _observers[messageTypes].remove(observer);
+            // observer.reset();
+
+            bool found = false;
+            // Ставим указатель на самое начало
+            auto it = _observers[messageTypes].before_begin();
+            // В цикле итерируем
+            for (auto current = _observers[messageTypes].begin();
+                current != _observers[messageTypes].end(); current++) {
+                if (*current == observer) {
+                    // Сообщаем об удалении если нашли
+                    found = true;
+                    std::cout << observer->getName() << " removed\n";
+
+                    // Удаляем элемент после указателя
+                    _observers[messageTypes].erase_after(it);
+                    // Сбрасываем счетчик ссылок для уничтожения объекта
+                    // умного указателя
                     observer.reset();
-                } else {
-                    ++it;
+
+                    break;
                 }
+                // Продвигаем указатель на следующий элемент
+                it = current;
+            }
+            // Сообщаем если не найдено
+            if (!found) {
+                std::cout << observer->getName() << " not found in event #"
+                          << messageTypes << "\n";
             }
         }
     }
 
     // В цикле перебираем список наблюдателей и вызываем у них метод notify
-    void notify()
+    void notify(int event) override
     {
-        // for (auto& observer : _observers) {
-        // observer->notify();
-        // }
+        for (auto& mObserver : _observers) {
+            // Если сообщения направлены всем или определенным наблюдателям
+            if (event == ALL || event == mObserver.first) {
+                // Перебираем forward_list
+                for (auto fObserver : mObserver.second) {
+                    fObserver->notify();
+                }
+            }
+        }
     }
 };
 
@@ -172,6 +208,10 @@ int main()
         // в деструкторе произвести удаление объекта.
         auto observer4 = Observer::make("Observer4");
     };
+    auto observer5 = Observer::make("Observer5");
+    auto observer6 = Observer::make("Observer6");
+    auto observer7 = Observer::make("Observer7");
+    auto observer8 = Observer::make("Observer8");
     std::cout << std::endl;
 
     // Создаем экземпляр субъекта
@@ -180,20 +220,24 @@ int main()
     subject.addObserver(Subject::LOG, observer1);
     subject.addObserver(Subject::DATA, observer2);
     subject.addObserver(Subject::MQTT, observer3);
+    subject.addObserver(Subject::LOG, observer5);
+    subject.addObserver(Subject::LOG, observer6);
+    subject.addObserver(Subject::DATA, observer7);
+    subject.addObserver(Subject::DATA, observer8);
     std::cout << std::endl;
 
-    // Вызываем метод notify у экземпляров наблюдателей
-    subject.notify();
+    // Вызываем метод notify у всех экземпляров наблюдателей
+    subject.notify(Subject::ALL);
     std::cout << std::endl;
 
     // Удаляем наблюдателя из списка
-    // subject.removeObserver(Subject::DATA, observer2);
-    subject.removeObserver(Subject::DATA, observer3);
+    subject.removeObserver(Subject::MQTT, observer2);
+    subject.removeObserver(Subject::DATA, observer2);
     std::cout << std::endl;
 
-    // Вызываем метод notify у оставшихся в списке
-    // экземпляров наблюдателей
-    subject.notify();
+    // Вызываем метод notify у наблюдателей MQTT
+    subject.notify(Subject::MQTT);
+    std::cout << std::endl;
 
     return 0;
 }
